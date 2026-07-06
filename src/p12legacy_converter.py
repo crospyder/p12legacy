@@ -119,7 +119,7 @@ class App(tk.Tk):
         options = ttk.Frame(body, padding=(0, 10, 0, 0))
         options.grid(row=1, column=0, sticky="ew")
         options.columnconfigure(1, weight=1)
-        ttk.Label(options, text="Output folder:").grid(row=0, column=0, sticky="w")
+        ttk.Label(options, text="Ovdje spremamo konvertirani certifikat:").grid(row=0, column=0, sticky="w")
         ttk.Entry(options, textvariable=self.output_dir).grid(row=0, column=1, sticky="ew", padx=8)
         ttk.Button(options, text="Odaberi", command=self.choose_output).grid(row=0, column=2)
         ttk.Checkbutton(options, text="Prikaži lozinke", variable=self.show, command=self.refresh).grid(row=0, column=3, padx=(12, 0))
@@ -192,7 +192,7 @@ class App(tk.Tk):
             ttk.Label(frame, textvariable=item.status, width=22).grid(row=0, column=3, sticky="w", padx=4)
 
     def choose_output(self) -> None:
-        folder = filedialog.askdirectory(title="Odaberi output folder")
+        folder = filedialog.askdirectory(title="Odaberi folder za konvertirane certifikate")
         if folder:
             self.output_dir.set(folder)
 
@@ -208,7 +208,7 @@ class App(tk.Tk):
             return
         output = Path(self.output_dir.get())
         if not output.exists():
-            messagebox.showerror(APP_NAME, "Output folder ne postoji.")
+            messagebox.showerror(APP_NAME, "Folder za konvertirane certifikate ne postoji.")
             return
         self.running = True
         self.convert_button.configure(state="disabled")
