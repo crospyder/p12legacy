@@ -10,8 +10,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "P12 Legacy Converter"
-APP_VERSION = "1.0.0"
-FOOTER_TEXT = "Izradio Neven Pausić / Spine ICT Solutions d.o.o. 2026"
+APP_VERSION = "1.0.1"
+FOOTER_TEXT = "P12 Legacy Converter v1.0.1 | Izradio Neven Pausić / Spine ICT Solutions d.o.o. 2026"
 
 
 def app_dir() -> Path:
@@ -55,14 +55,23 @@ class CertItem:
     path: Path
     secret: tk.StringVar
     status: tk.StringVar
+    output: tk.StringVar
 
 
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("980x620")
-        self.minsize(900, 560)
+        self.geometry("1100x680")
+        self.minsize(980, 620)
+
+        self.style = ttk.Style(self)
+        self.style.configure("TLabel", font=("Segoe UI", 11))
+        self.style.configure("TButton", font=("Segoe UI", 10))
+        self.style.configure("TCheckbutton", font=("Segoe UI", 10))
+        self.style.configure("Header.TLabel", font=("Segoe UI", 18, "bold"))
+        self.style.configure("Column.TLabel", font=("Segoe UI", 11, "bold"))
+
         self.openssl = find_openssl()
         self.provider_path = find_provider_path(self.openssl) if self.openssl else None
         self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop"))
@@ -70,7 +79,11 @@ class App(tk.Tk):
         self.show = tk.BooleanVar(value=False)
         self.running = False
         self.selected: list[tk.BooleanVar] = []
+        self.row_frames: list[ttk.Frame] = []
+        self.context_index: int | None = None
+
         self.build_ui()
+        self.build_context_menu()
         self.log_startup()
 
     def build_ui(self) -> None:
@@ -80,7 +93,7 @@ class App(tk.Tk):
         header = ttk.Frame(self, padding=(14, 12, 14, 8))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=APP_NAME, font=("Segoe UI", 16, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=APP_NAME, style="Header.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(header, text="Konverzija .p12/.pfx certifikata u legacy PFX format za starije Windows sustave.").grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         buttons = ttk.Frame(header)
@@ -102,9 +115,10 @@ class App(tk.Tk):
         columns = ttk.Frame(table)
         columns.grid(row=0, column=0, sticky="ew")
         columns.columnconfigure(0, weight=1)
-        ttk.Label(columns, text="Certifikat", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(34, 4))
-        ttk.Label(columns, text="Lozinka", font=("Segoe UI", 10, "bold"), width=22).grid(row=0, column=1, sticky="w", padx=4)
-        ttk.Label(columns, text="Status", font=("Segoe UI", 10, "bold"), width=22).grid(row=0, column=2, sticky="w", padx=4)
+        ttk.Label(columns, text="Certifikat", style="Column.TLabel").grid(row=0, column=0, sticky="w", padx=(34, 4))
+        ttk.Label(columns, text="Lozinka", style="Column.TLabel", width=20).grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(columns, text="Status", style="Column.TLabel", width=18).grid(row=0, column=2, sticky="w", padx=4)
+        ttk.Label(columns, text="Legacy PFX", style="Column.TLabel", width=26).grid(row=0, column=3, sticky="w", padx=4)
 
         self.canvas = tk.Canvas(table, highlightthickness=1, highlightbackground="#cccccc")
         self.rows = ttk.Frame(self.canvas)
@@ -122,7 +136,8 @@ class App(tk.Tk):
         ttk.Label(options, text="Ovdje spremamo konvertirani certifikat:").grid(row=0, column=0, sticky="w")
         ttk.Entry(options, textvariable=self.output_dir).grid(row=0, column=1, sticky="ew", padx=8)
         ttk.Button(options, text="Odaberi", command=self.choose_output).grid(row=0, column=2)
-        ttk.Checkbutton(options, text="Prikaži lozinke", variable=self.show, command=self.refresh).grid(row=0, column=3, padx=(12, 0))
+        ttk.Button(options, text="Otvori folder", command=self.open_output_folder).grid(row=0, column=3, padx=(8, 0))
+        ttk.Checkbutton(options, text="Prikaži lozinke", variable=self.show, command=self.refresh).grid(row=0, column=4, padx=(12, 0))
 
         action = ttk.Frame(body, padding=(0, 10, 0, 0))
         action.grid(row=2, column=0, sticky="ew")
@@ -135,7 +150,7 @@ class App(tk.Tk):
         log_box = ttk.LabelFrame(body, text="Log", padding=8)
         log_box.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
         log_box.columnconfigure(0, weight=1)
-        self.log_text = tk.Text(log_box, height=9, wrap="word", state="disabled")
+        self.log_text = tk.Text(log_box, height=9, wrap="word", state="disabled", font=("Consolas", 10))
         self.log_text.grid(row=0, column=0, sticky="nsew")
 
         footer = ttk.Frame(self, padding=(14, 4, 14, 10))
@@ -144,12 +159,20 @@ class App(tk.Tk):
         ttk.Separator(footer).grid(row=0, column=0, sticky="ew", pady=(0, 6))
         ttk.Label(footer, text=FOOTER_TEXT, anchor="center").grid(row=1, column=0, sticky="ew")
 
+    def build_context_menu(self) -> None:
+        self.menu = tk.Menu(self, tearoff=0)
+        self.menu.add_command(label="Otvori lokaciju certifikata", command=self.open_input_location)
+        self.menu.add_command(label="Otvori output folder", command=self.open_output_folder)
+        self.menu.add_separator()
+        self.menu.add_command(label="Ponovi konverziju", command=self.convert_context_item)
+        self.menu.add_command(label="Ukloni iz liste", command=self.remove_context_item)
+
     def log_startup(self) -> None:
         if self.openssl:
             self.log(f"OpenSSL: {self.openssl}")
             self.log(f"Provider path: {self.provider_path}")
         else:
-            self.log("GREŠKA: OpenSSL nije pronađen. Dodaj portable OpenSSL u folder openssl uz aplikaciju.")
+            self.log("GREŠKA: Portable OpenSSL nije pronađen. Provjerite postoji li mapa openssl u direktoriju aplikacije.")
 
     def log(self, text: str) -> None:
         self.log_text.configure(state="normal")
@@ -160,10 +183,14 @@ class App(tk.Tk):
     def add_files(self) -> None:
         files = filedialog.askopenfilenames(title="Odaberi certifikate", filetypes=[("PKCS12", "*.p12 *.pfx"), ("Sve datoteke", "*.*")])
         known = {str(item.path).lower() for item in self.items}
+        added = False
         for name in files:
             path = Path(name)
             if str(path).lower() not in known:
-                self.items.append(CertItem(path=path, secret=tk.StringVar(), status=tk.StringVar(value="Spreman")))
+                self.items.append(CertItem(path=path, secret=tk.StringVar(), status=tk.StringVar(value="Spreman"), output=tk.StringVar(value="")))
+                added = True
+        if added and len(self.items) == len(files):
+            self.output_dir.set(str(Path(files[0]).parent))
         self.refresh()
 
     def remove_selected(self) -> None:
@@ -179,28 +206,80 @@ class App(tk.Tk):
         for widget in self.rows.winfo_children():
             widget.destroy()
         self.selected = []
+        self.row_frames = []
         mask = "" if self.show.get() else "*"
         for idx, item in enumerate(self.items):
             selected = tk.BooleanVar(value=True)
             self.selected.append(selected)
-            frame = ttk.Frame(self.rows, padding=(4, 3, 4, 3))
+            frame = ttk.Frame(self.rows, padding=(4, 4, 4, 4))
             frame.grid(row=idx, column=0, sticky="ew")
             frame.columnconfigure(1, weight=1)
-            ttk.Checkbutton(frame, variable=selected).grid(row=0, column=0, padx=(0, 6))
-            ttk.Label(frame, text=str(item.path), anchor="w").grid(row=0, column=1, sticky="ew", padx=(0, 6))
-            ttk.Entry(frame, textvariable=item.secret, show=mask, width=24).grid(row=0, column=2, sticky="ew", padx=4)
-            ttk.Label(frame, textvariable=item.status, width=22).grid(row=0, column=3, sticky="w", padx=4)
+            self.row_frames.append(frame)
+            frame.bind("<Button-3>", lambda e, i=idx: self.show_context_menu(e, i))
+
+            widgets = [
+                ttk.Checkbutton(frame, variable=selected),
+                ttk.Label(frame, text=str(item.path), anchor="w"),
+                ttk.Entry(frame, textvariable=item.secret, show=mask, width=22),
+                ttk.Label(frame, textvariable=item.status, width=18),
+                ttk.Button(frame, textvariable=item.output, command=lambda i=idx: self.open_output_file(i)),
+            ]
+            widgets[0].grid(row=0, column=0, padx=(0, 6))
+            widgets[1].grid(row=0, column=1, sticky="ew", padx=(0, 6))
+            widgets[2].grid(row=0, column=2, sticky="ew", padx=4)
+            widgets[3].grid(row=0, column=3, sticky="w", padx=4)
+            widgets[4].grid(row=0, column=4, sticky="w", padx=4)
+            for widget in widgets:
+                widget.bind("<Button-3>", lambda e, i=idx: self.show_context_menu(e, i))
 
     def choose_output(self) -> None:
         folder = filedialog.askdirectory(title="Odaberi folder za konvertirane certifikate")
         if folder:
             self.output_dir.set(folder)
 
+    def open_output_folder(self) -> None:
+        folder = Path(self.output_dir.get())
+        if folder.exists():
+            os.startfile(str(folder))
+        else:
+            messagebox.showerror(APP_NAME, "Folder za konvertirane certifikate ne postoji.")
+
+    def open_input_location(self) -> None:
+        if self.context_index is None:
+            return
+        path = self.items[self.context_index].path
+        if path.exists():
+            subprocess.Popen(["explorer", "/select,", str(path)])
+
+    def open_output_file(self, index: int) -> None:
+        output_name = self.items[index].output.get()
+        if not output_name or output_name == "-":
+            return
+        output_file = Path(self.output_dir.get()) / output_name
+        if output_file.exists():
+            subprocess.Popen(["explorer", "/select,", str(output_file)])
+
+    def show_context_menu(self, event: tk.Event, index: int) -> None:
+        self.context_index = index
+        self.menu.tk_popup(event.x_root, event.y_root)
+
+    def remove_context_item(self) -> None:
+        if self.context_index is not None:
+            del self.items[self.context_index]
+            self.context_index = None
+            self.refresh()
+
+    def convert_context_item(self) -> None:
+        if self.context_index is None or self.running:
+            return
+        output = Path(self.output_dir.get())
+        threading.Thread(target=self.worker, args=([self.items[self.context_index]], output), daemon=True).start()
+
     def convert_selected(self) -> None:
         if self.running:
             return
         if not self.openssl:
-            messagebox.showerror(APP_NAME, "OpenSSL nije pronađen.")
+            messagebox.showerror(APP_NAME, "Portable OpenSSL nije pronađen. Provjerite postoji li mapa openssl u direktoriju aplikacije.")
             return
         selected = [item for item, flag in zip(self.items, self.selected) if flag.get()]
         if not selected:
@@ -218,13 +297,14 @@ class App(tk.Tk):
     def worker(self, selected: list[CertItem], output: Path) -> None:
         try:
             for idx, item in enumerate(selected, start=1):
-                self.after(0, item.status.set, "Obrada")
+                self.after(0, item.status.set, "⏳ Obrada")
                 try:
-                    self.convert_one(item, output)
-                    self.after(0, item.status.set, "Uspješno")
-                    self.after(0, self.log, f"OK: {item.path.name}")
+                    output_file = self.convert_one(item, output)
+                    self.after(0, item.status.set, "✓ Uspješno")
+                    self.after(0, item.output.set, output_file.name)
+                    self.after(0, self.log, f"OK: {item.path.name} -> {output_file.name}")
                 except Exception as exc:
-                    self.after(0, item.status.set, "Greška")
+                    self.after(0, item.status.set, "✗ Greška")
                     self.after(0, self.log, f"GREŠKA: {item.path.name}: {exc}")
                 self.after(0, self.progress.configure, {"value": idx})
         finally:
@@ -235,7 +315,7 @@ class App(tk.Tk):
         self.convert_button.configure(state="normal")
         self.log("Gotovo.")
 
-    def convert_one(self, item: CertItem, output: Path) -> None:
+    def convert_one(self, item: CertItem, output: Path) -> Path:
         pwd = item.secret.get()
         if not pwd:
             raise RuntimeError("lozinka nije upisana")
@@ -259,6 +339,7 @@ class App(tk.Tk):
                 "-provider", "default", "-provider", "legacy",
                 "-out", str(out_file), "-inkey", str(pem_file), "-in", str(pem_file),
             ], env, pwd + "\n" + pwd + "\n")
+        return out_file
 
     def run_openssl(self, args: list[str], env: dict[str, str], stdin_text: str) -> None:
         assert self.openssl is not None
