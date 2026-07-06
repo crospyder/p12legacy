@@ -10,8 +10,15 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "P12 Legacy Converter"
-APP_VERSION = "1.0.1"
-FOOTER_TEXT = "P12 Legacy Converter v1.0.1 | Izradio Neven Pausić / Spine ICT Solutions d.o.o. 2026"
+APP_VERSION = "1.0.2"
+FOOTER_TEXT = "P12 Legacy Converter v1.0.2 | Izradio Neven Pausić / Spine ICT Solutions d.o.o. 2026"
+
+SELECT_W = 34
+CERT_W = 520
+PASS_W = 170
+STATUS_W = 150
+PFX_W = 270
+TABLE_W = SELECT_W + CERT_W + PASS_W + STATUS_W + PFX_W + 40
 
 
 def app_dir() -> Path:
@@ -62,8 +69,9 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("1100x680")
-        self.minsize(980, 620)
+        self.geometry("1220x680")
+        self.minsize(1220, 620)
+        self.resizable(True, True)
 
         self.style = ttk.Style(self)
         self.style.configure("TLabel", font=("Segoe UI", 11))
@@ -79,7 +87,6 @@ class App(tk.Tk):
         self.show = tk.BooleanVar(value=False)
         self.running = False
         self.selected: list[tk.BooleanVar] = []
-        self.row_frames: list[ttk.Frame] = []
         self.context_index: int | None = None
 
         self.build_ui()
@@ -112,15 +119,15 @@ class App(tk.Tk):
         table.columnconfigure(0, weight=1)
         table.rowconfigure(1, weight=1)
 
-        columns = ttk.Frame(table)
-        columns.grid(row=0, column=0, sticky="ew")
-        columns.columnconfigure(0, weight=1)
-        ttk.Label(columns, text="Certifikat", style="Column.TLabel").grid(row=0, column=0, sticky="w", padx=(34, 4))
-        ttk.Label(columns, text="Lozinka", style="Column.TLabel", width=20).grid(row=0, column=1, sticky="w", padx=4)
-        ttk.Label(columns, text="Status", style="Column.TLabel", width=18).grid(row=0, column=2, sticky="w", padx=4)
-        ttk.Label(columns, text="Legacy PFX", style="Column.TLabel", width=26).grid(row=0, column=3, sticky="w", padx=4)
+        columns = tk.Frame(table)
+        columns.grid(row=0, column=0, sticky="w")
+        self.set_table_columns(columns)
+        ttk.Label(columns, text="Certifikat", style="Column.TLabel").grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(columns, text="Lozinka", style="Column.TLabel").grid(row=0, column=2, sticky="w", padx=4)
+        ttk.Label(columns, text="Status", style="Column.TLabel").grid(row=0, column=3, sticky="w", padx=4)
+        ttk.Label(columns, text="Legacy PFX", style="Column.TLabel").grid(row=0, column=4, sticky="w", padx=4)
 
-        self.canvas = tk.Canvas(table, highlightthickness=1, highlightbackground="#cccccc")
+        self.canvas = tk.Canvas(table, highlightthickness=1, highlightbackground="#cccccc", width=TABLE_W)
         self.rows = ttk.Frame(self.canvas)
         scroll = ttk.Scrollbar(table, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=scroll.set)
@@ -128,7 +135,7 @@ class App(tk.Tk):
         scroll.grid(row=1, column=1, sticky="ns")
         self.canvas_window = self.canvas.create_window((0, 0), window=self.rows, anchor="nw")
         self.rows.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.canvas_window, width=e.width))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.canvas_window, width=max(e.width, TABLE_W)))
 
         options = ttk.Frame(body, padding=(0, 10, 0, 0))
         options.grid(row=1, column=0, sticky="ew")
@@ -159,6 +166,12 @@ class App(tk.Tk):
         ttk.Separator(footer).grid(row=0, column=0, sticky="ew", pady=(0, 6))
         ttk.Label(footer, text=FOOTER_TEXT, anchor="center").grid(row=1, column=0, sticky="ew")
 
+    @staticmethod
+    def set_table_columns(frame: tk.Misc) -> None:
+        widths = [SELECT_W, CERT_W, PASS_W, STATUS_W, PFX_W]
+        for i, width in enumerate(widths):
+            frame.grid_columnconfigure(i, minsize=width, weight=0)
+
     def build_context_menu(self) -> None:
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(label="Otvori lokaciju certifikata", command=self.open_input_location)
@@ -183,14 +196,15 @@ class App(tk.Tk):
     def add_files(self) -> None:
         files = filedialog.askopenfilenames(title="Odaberi certifikate", filetypes=[("PKCS12", "*.p12 *.pfx"), ("Sve datoteke", "*.*")])
         known = {str(item.path).lower() for item in self.items}
-        added = False
+        first_added: Path | None = None
         for name in files:
             path = Path(name)
             if str(path).lower() not in known:
                 self.items.append(CertItem(path=path, secret=tk.StringVar(), status=tk.StringVar(value="Spreman"), output=tk.StringVar(value="")))
-                added = True
-        if added and len(self.items) == len(files):
-            self.output_dir.set(str(Path(files[0]).parent))
+                if first_added is None:
+                    first_added = path
+        if first_added is not None:
+            self.output_dir.set(str(first_added.parent))
         self.refresh()
 
     def remove_selected(self) -> None:
@@ -206,30 +220,28 @@ class App(tk.Tk):
         for widget in self.rows.winfo_children():
             widget.destroy()
         self.selected = []
-        self.row_frames = []
         mask = "" if self.show.get() else "*"
         for idx, item in enumerate(self.items):
             selected = tk.BooleanVar(value=True)
             self.selected.append(selected)
             frame = ttk.Frame(self.rows, padding=(4, 4, 4, 4))
-            frame.grid(row=idx, column=0, sticky="ew")
-            frame.columnconfigure(1, weight=1)
-            self.row_frames.append(frame)
+            frame.grid(row=idx, column=0, sticky="w")
+            self.set_table_columns(frame)
             frame.bind("<Button-3>", lambda e, i=idx: self.show_context_menu(e, i))
 
-            widgets = [
-                ttk.Checkbutton(frame, variable=selected),
-                ttk.Label(frame, text=str(item.path), anchor="w"),
-                ttk.Entry(frame, textvariable=item.secret, show=mask, width=22),
-                ttk.Label(frame, textvariable=item.status, width=18),
-                ttk.Button(frame, textvariable=item.output, command=lambda i=idx: self.open_output_file(i)),
-            ]
-            widgets[0].grid(row=0, column=0, padx=(0, 6))
-            widgets[1].grid(row=0, column=1, sticky="ew", padx=(0, 6))
-            widgets[2].grid(row=0, column=2, sticky="ew", padx=4)
-            widgets[3].grid(row=0, column=3, sticky="w", padx=4)
-            widgets[4].grid(row=0, column=4, sticky="w", padx=4)
-            for widget in widgets:
+            check = ttk.Checkbutton(frame, variable=selected)
+            cert_label = ttk.Label(frame, text=str(item.path), anchor="w")
+            password_entry = ttk.Entry(frame, textvariable=item.secret, show=mask)
+            status_label = ttk.Label(frame, textvariable=item.status, anchor="w")
+            output_button = ttk.Button(frame, textvariable=item.output, command=lambda i=idx: self.open_output_file(i))
+
+            check.grid(row=0, column=0, sticky="w", padx=(0, 6))
+            cert_label.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+            password_entry.grid(row=0, column=2, sticky="ew", padx=4)
+            status_label.grid(row=0, column=3, sticky="w", padx=4)
+            output_button.grid(row=0, column=4, sticky="ew", padx=4)
+
+            for widget in (frame, check, cert_label, password_entry, status_label, output_button):
                 widget.bind("<Button-3>", lambda e, i=idx: self.show_context_menu(e, i))
 
     def choose_output(self) -> None:
@@ -297,14 +309,14 @@ class App(tk.Tk):
     def worker(self, selected: list[CertItem], output: Path) -> None:
         try:
             for idx, item in enumerate(selected, start=1):
-                self.after(0, item.status.set, "⏳ Obrada")
+                self.after(0, item.status.set, "Obrada")
                 try:
                     output_file = self.convert_one(item, output)
-                    self.after(0, item.status.set, "✓ Uspješno")
+                    self.after(0, item.status.set, "Uspješno")
                     self.after(0, item.output.set, output_file.name)
                     self.after(0, self.log, f"OK: {item.path.name} -> {output_file.name}")
                 except Exception as exc:
-                    self.after(0, item.status.set, "✗ Greška")
+                    self.after(0, item.status.set, "Greška")
                     self.after(0, self.log, f"GREŠKA: {item.path.name}: {exc}")
                 self.after(0, self.progress.configure, {"value": idx})
         finally:
